@@ -1,0 +1,45 @@
+name: Sync upstream releases
+
+# Follows shuaiplus/nodewarden releases (not every commit on main).
+# When upstream publishes a newer release tag, merge it into main and push.
+# Cloudflare Workers Builds deploys every push to main (npm run deploy:kv).
+# A merge conflict fails the job, so GitHub emails the owner and nothing is deployed.
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge the latest upstream release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/shuaiplus/nodewarden.git
+          git fetch upstream --tags --force
+          tag=$(gh release view --repo shuaiplus/nodewarden --json tagName --jq .tagName)
+          echo "Latest upstream release: $tag"
+          if git merge-base --is-ancestor "$tag" HEAD; then
+            echo "Already contains $tag, nothing to do."
+            exit 0
+          fi
+          git merge --no-edit "$tag" -m "chore: sync upstream release $tag"
+          git push origin HEAD:main
+          echo "Merged $tag; Workers Builds will deploy it."
